@@ -1,0 +1,20 @@
+2024-08-06 18:29:29 - Starting epoch 1/10
+2024-08-06 18:29:29 - Batch 0 - Train Loss 5.4585 - Val Loss 4.0960
+2024-08-06 18:29:29 - Starting epoch 2/10
+2024-08-06 18:29:29 - Batch 0 - Train Loss 4.2792 - Val Loss 2.7790
+2024-08-06 18:29:29 - Starting epoch 3/10
+2024-08-06 18:29:29 - Batch 0 - Train Loss 2.7355 - Val Loss 2.5147
+2024-08-06 18:29:29 - Starting epoch 4/10
+2024-08-06 18:29:30 - Batch 0 - Train Loss 2.5574 - Val Loss 2.4420
+2024-08-06 18:29:30 - Starting epoch 5/10
+2024-08-06 18:29:30 - Batch 0 - Train Loss 2.4272 - Val Loss 2.3291
+2024-08-06 18:29:30 - Starting epoch 6/10
+2024-08-06 18:29:30 - Batch 0 - Train Loss 2.3420 - Val Loss 2.2829
+2024-08-06 18:29:30 - Starting epoch 7/10
+2024-08-06 18:29:30 - Batch 0 - Train Loss 2.2766 - Val Loss 2.2245
+2024-08-06 18:29:30 - Starting epoch 8/10
+2024-08-06 18:29:31 - Batch 0 - Train Loss 2.2231 - Val Loss 2.1847
+2024-08-06 18:29:31 - Starting epoch 9/10
+2024-08-06 18:29:31 - Batch 0 - Train Loss 2.1769 - Val Loss 2.1452
+2024-08-06 18:29:31 - Starting epoch 10/10
+2024-08-06 18:29:31 - Batch 0 - Train Loss 2.1361 - Val Loss 2.1117
