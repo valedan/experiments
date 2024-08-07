@@ -1,13 +1,16 @@
 # %%
 
+import asyncio
 from infra.logger import DataLogger
 from datasets import load_dataset
+from typing import Any
 import torch as t
 from torch import nn
 from torch.utils import data
 import matplotlib.pyplot as plt
 
 from infra.models import MLP
+from infra.runner import Sweep
 
 plt.switch_backend("agg")
 
@@ -23,21 +26,62 @@ def multiclass_accuracy(logits, labels):
     return accuracy
 
 
-def train_classifier(
-    model: nn.Module,
-    train_loader: data.DataLoader,
-    val_loader: data.DataLoader,
-    logger: DataLogger,
-    n_epochs: int = 1,
-    val_interval: int = 100,
-    learning_rate: float = 0.001,
+def create_mnist_loaders(
+    train_frac=0, val_frac=0, test_frac=0, train_batch=1, val_batch=1, test_batch=1
 ):
+    train_loader, val_loader, test_loader = None, None, None
+    assert all(frac <= 1 for frac in (train_frac, val_frac, test_frac))
+    if train_frac or val_frac:
+        train_set = load_dataset("mnist", split="train").with_format(
+            type="torch", columns=["image", "label"]
+        )
+        train_set, val_set, _ = data.random_split(
+            train_set, [train_frac, val_frac, 1 - train_frac - val_frac]
+        )
+        if train_frac:
+            train_loader = data.DataLoader(
+                train_set, batch_size=train_batch, shuffle=True, num_workers=4
+            )
+        if val_frac:
+            val_loader = data.DataLoader(
+                val_set, batch_size=val_batch, shuffle=False, num_workers=4
+            )
+
+    if test_frac:
+        test_set = load_dataset("mnist", split="test").with_format(
+            type="torch", columns=["image", "label"]
+        )
+        test_set, _ = data.random_split(test_set, [test_frac, 1 - test_frac])
+        test_loader = data.DataLoader(
+            test_set, batch_size=test_batch, shuffle=False, num_workers=4
+        )
+
+    return train_loader, val_loader, test_loader
+
+
+async def train_classifier(
+    logger: DataLogger,
+    params: dict[str, Any],
+):
+    train_loader, val_loader, _ = create_mnist_loaders(
+        params["train_frac"],
+        params["val_frac"],
+        0,
+        params["train_batch"],
+        params["val_batch"],
+    )
+    assert train_loader and val_loader
+    logger.log(
+        f"Train set: {len(train_loader.dataset)}, Val set: {len(val_loader.dataset)}"
+    )
+    model = MLP(28 * 28, 10, params["depth"], params["width"])
+    model = model.to(device)
     step = 0
     criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = t.optim.SGD(model.parameters(), learning_rate)
+    optimizer = t.optim.SGD(model.parameters(), params["learning_rate"])
 
-    for epoch in range(1, n_epochs + 1):
-        logger.log(f"Starting epoch {epoch}/{n_epochs}")
+    for epoch in range(1, params["epochs"] + 1):
+        logger.log(f"Starting epoch {epoch}/{params['epochs']}")
         for batch_idx, batch in enumerate(train_loader):
             # TODO: put this data wrangling into the dataloader or dataset
             images, labels = (
@@ -59,7 +103,7 @@ def train_classifier(
                 "train_loss": loss.item(),
                 "train_accuracy": train_accuracy,
             }
-            if step % val_interval == 0:
+            if step % params["val_interval"] == 0:
                 total_loss = 0
                 val_batches = 0
                 # the accuracy will be slightly off if the last batch has fewer items, but does not seem worth the complexity to fix
@@ -89,27 +133,28 @@ def train_classifier(
             step += 1
 
 
-train_set = load_dataset("mnist", split="train").with_format(
-    type="torch", columns=["image", "label"]
-)  # 60000
-test_set = load_dataset("mnist", split="test").with_format(
-    type="torch", columns=["image", "label"]
-)  # 10000
-train_set, _ = data.random_split(train_set, [1000, 59000])
-test_set, _ = data.random_split(test_set, [1000, 9000])
+params = {
+    "width": range(10, 100, 30),
+    "depth": [2, 4],
+    "epochs": [5],
+    "val_interval": [1],
+    "learning_rate": [0.001],
+    "train_frac": [0.01],
+    "val_frac": [0.01],
+    "train_batch": [64],
+    "val_batch": [64],
+}
 
-train_loader = data.DataLoader(train_set, batch_size=1000, shuffle=True, num_workers=4)
-val_loader = data.DataLoader(test_set, batch_size=1000, shuffle=False, num_workers=4)
 
-for width in range(10, 100, 30):
-    # width = 1000
-    depth = 5
-    epochs = 10
-    val_interval = 1
-    id = f"d{depth}_w{width}"
-    data_file = f"test_results/{id}.jsonl"
-    log_file = f"test_results/{id}.txt"
-    logger = DataLogger(id, data_file, log_file)
-    model = MLP(28 * 28, 10, depth, width)
-    model = model.to(device)
-    train_classifier(model, train_loader, val_loader, logger, epochs, val_interval)
+def main():
+    sweep = Sweep(
+        train_classifier,
+        params,
+        "test_sweep",
+        run_name_formatter=lambda params: f"d{params['depth']}w{params['width']}",
+    )
+    asyncio.run(sweep.start())
+
+
+if __name__ == "__main__":
+    main()

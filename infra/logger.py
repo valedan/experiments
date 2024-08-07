@@ -52,8 +52,8 @@ class DataLogger:
         if not self.log_file:
             raise ValueError("No log file registered")
 
-        log = f"{self._now()} - {log}"
         if self.print_logs:
-            print(log)
+            print(f"{self.id} - {log}")
+        log = f"{self._now()} - {log}"
         with self.log_file.open("a") as f:
             f.write(log + "\n")

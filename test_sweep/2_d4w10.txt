@@ -1,0 +1,72 @@
+2024-08-07 18:01:04 - Starting run 2
+2024-08-07 18:01:05 - Train set: 600, Val set: 600
+2024-08-07 18:01:05 - Starting epoch 1/5
+2024-08-07 18:01:05 - Batch 0 - Train Loss 6.6606 - Val Loss 7.5322
+2024-08-07 18:01:05 - Batch 1 - Train Loss 7.2534 - Val Loss 4.9447
+2024-08-07 18:01:05 - Batch 2 - Train Loss 4.6312 - Val Loss 3.4383
+2024-08-07 18:01:05 - Batch 3 - Train Loss 3.5736 - Val Loss 3.1295
+2024-08-07 18:01:05 - Batch 4 - Train Loss 3.2216 - Val Loss 3.0111
+2024-08-07 18:01:05 - Batch 5 - Train Loss 2.9674 - Val Loss 2.6894
+2024-08-07 18:01:05 - Batch 6 - Train Loss 2.6408 - Val Loss 2.5773
+2024-08-07 18:01:05 - Batch 7 - Train Loss 2.5854 - Val Loss 2.5369
+2024-08-07 18:01:05 - Batch 8 - Train Loss 2.5676 - Val Loss 2.4104
+2024-08-07 18:01:05 - Batch 9 - Train Loss 2.5460 - Val Loss 2.3072
+2024-08-07 18:01:05 - Starting epoch 2/5
+2024-08-07 18:01:06 - Batch 0 - Train Loss 2.1142 - Val Loss 2.3315
+2024-08-07 18:01:06 - Batch 1 - Train Loss 2.1305 - Val Loss 2.1989
+2024-08-07 18:01:06 - Batch 2 - Train Loss 2.1067 - Val Loss 2.1432
+2024-08-07 18:01:06 - Batch 3 - Train Loss 2.2402 - Val Loss 2.2977
+2024-08-07 18:01:06 - Batch 4 - Train Loss 2.0816 - Val Loss 2.0726
+2024-08-07 18:01:06 - Batch 5 - Train Loss 1.9666 - Val Loss 2.0226
+2024-08-07 18:01:06 - Batch 6 - Train Loss 2.0968 - Val Loss 1.9844
+2024-08-07 18:01:06 - Batch 7 - Train Loss 1.7588 - Val Loss 1.9748
+2024-08-07 18:01:06 - Batch 8 - Train Loss 1.6403 - Val Loss 1.9177
+2024-08-07 18:01:06 - Batch 9 - Train Loss 1.7963 - Val Loss 1.8924
+2024-08-07 18:01:06 - Starting epoch 3/5
+2024-08-07 18:01:06 - Batch 0 - Train Loss 1.7323 - Val Loss 1.8634
+2024-08-07 18:01:07 - Batch 1 - Train Loss 1.6483 - Val Loss 1.9502
+2024-08-07 18:01:07 - Batch 2 - Train Loss 1.7244 - Val Loss 1.8724
+2024-08-07 18:01:07 - Batch 3 - Train Loss 1.8069 - Val Loss 1.8442
+2024-08-07 18:01:07 - Batch 4 - Train Loss 1.7837 - Val Loss 1.7980
+2024-08-07 18:01:07 - Batch 5 - Train Loss 1.7358 - Val Loss 1.7869
+2024-08-07 18:01:07 - Batch 6 - Train Loss 1.7060 - Val Loss 1.7857
+2024-08-07 18:01:07 - Batch 7 - Train Loss 1.3334 - Val Loss 1.7439
+2024-08-07 18:01:07 - Batch 8 - Train Loss 1.5983 - Val Loss 1.7151
+2024-08-07 18:01:07 - Batch 9 - Train Loss 1.7099 - Val Loss 1.7971
+2024-08-07 18:01:07 - Starting epoch 4/5
+2024-08-07 18:01:07 - Batch 0 - Train Loss 1.3438 - Val Loss 1.6836
+2024-08-07 18:01:07 - Batch 1 - Train Loss 1.5485 - Val Loss 1.6687
+2024-08-07 18:01:08 - Batch 2 - Train Loss 1.2513 - Val Loss 1.6665
+2024-08-07 18:01:08 - Batch 3 - Train Loss 1.7405 - Val Loss 1.6387
+2024-08-07 18:01:08 - Batch 4 - Train Loss 1.5475 - Val Loss 1.6222
+2024-08-07 18:01:08 - Batch 5 - Train Loss 1.7787 - Val Loss 1.6075
+2024-08-07 18:01:08 - Batch 6 - Train Loss 1.2563 - Val Loss 1.6346
+2024-08-07 18:01:13 - RuntimeError: DataLoader worker (pid(s) 3105123, 3105155) exited unexpectedly
+Traceback (most recent call last):
+  File "/home/dan/projects/exploration/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1131, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/dan/.pyenv/versions/3.12.4/lib/python3.12/multiprocessing/queues.py", line 114, in get
+    raise Empty
+_queue.Empty
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/dan/projects/exploration/infra/runner.py", line 43, in start
+    await self.run_func(self.logger, self.params)
+  File "/home/dan/projects/exploration/experiments/mnist/experiment.py", line 112, in train_classifier
+    for i, val_batch in enumerate(val_loader):
+  File "/home/dan/projects/exploration/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 630, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/home/dan/projects/exploration/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1327, in _next_data
+    idx, data = self._get_data()
+                ^^^^^^^^^^^^^^^^
+  File "/home/dan/projects/exploration/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1293, in _get_data
+    success, data = self._try_get_data()
+                    ^^^^^^^^^^^^^^^^^^^^
+  File "/home/dan/projects/exploration/.venv/lib/python3.12/site-packages/torch/utils/data/dataloader.py", line 1144, in _try_get_data
+    raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
+RuntimeError: DataLoader worker (pid(s) 3105123, 3105155) exited unexpectedly
+
