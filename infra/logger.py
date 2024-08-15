@@ -11,6 +11,7 @@ class DataLogger:
         id: str | None = None,
         data_file: str | None = None,
         log_file: str | None = None,
+        progress_file: str | None = None,
         id_key: str = "id",
         print_logs: bool = True,
     ):
@@ -18,6 +19,7 @@ class DataLogger:
         self.id_key = id_key
         self.data_file = Path(data_file) if data_file else None
         self.log_file = Path(log_file) if log_file else None
+        self.progress_file = Path(progress_file) if progress_file else None
         self.print_logs = print_logs
         self.init_files()
 
@@ -35,6 +37,13 @@ class DataLogger:
             if not self.log_file.exists():
                 self.log_file.parent.mkdir(parents=True, exist_ok=True)
                 self.log_file.touch()
+
+        if self.progress_file:
+            if self.progress_file.suffix != ".txt":
+                raise ValueError("progress file must be txt")
+            if not self.progress_file.exists():
+                self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+                self.progress_file.touch()
 
     @staticmethod
     def _now():
@@ -57,3 +66,11 @@ class DataLogger:
         log = f"{self._now()} - {log}"
         with self.log_file.open("a") as f:
             f.write(log + "\n")
+
+    # TODO: this should really be some kind of queue or pipe, but this is easier for now.
+    def log_progress(self, completed_items: int):
+        if not self.progress_file:
+            raise ValueError("No progress file registered")
+
+        with self.progress_file.open("a") as f:
+            f.write(f"{completed_items}" + "\n")

@@ -11,9 +11,10 @@ class MLP(nn.Module):
         self.output = nn.Linear(width, output_dim)
 
     def forward(self, X):
+        # todo: use sequential
         X = self.input(X)
         for layer in self.layers:
-            X = layer(X)
+            X = nn.functional.relu(layer(X))
 
         X = self.output(X)
         return X
