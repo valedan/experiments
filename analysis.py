@@ -1,3 +1,6 @@
+plt.switch_backend("agg")
+
+
 def plot_training_logs(logs: list[TrainingLog], depth, width, results_dir):
     # Convert logs to DataFrame for easier plotting
     df = pd.DataFrame(

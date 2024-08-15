@@ -1,4 +1,7 @@
 from pathlib import Path
+import yaml
+import os
+import torch as t
 import time
 import random
 from tqdm import tqdm
@@ -21,14 +24,14 @@ class Run:
 
     def __init__(
         self,
-        run_func: Callable,
+        trainer: Callable,
         trainer_params: dict[str, Any],
         loader_params: dict[str, Any],
-        data_dir: str,
-        run_id: str,
+        data_dir: Path,
+        run_id: int,
         name: str | None = None,
     ):
-        self.run_func = run_func
+        self.trainer = trainer
         self.trainer_params = trainer_params
         self.loader_params = loader_params
         self.data_dir = data_dir
@@ -44,21 +47,22 @@ class Run:
             * self.trainer_params["epochs"]
         )
 
+    # TODO: Change this to __call__
     def start(self):
-        data_file = f"{self.data_dir}/{self.run_id}{'_' + self.name if self.name else None}.jsonl"
+        data_file = f"{self.data_dir}/{self.run_id:04d}{'_' + self.name if self.name else None}.jsonl"
         log_file = f"{self.data_dir}/logs.txt"
         progress_file = f"{self.data_dir}/progress.txt"
         logger = DataLogger(
-            self.run_id, data_file, log_file, progress_file, print_logs=False
+            str(self.run_id), data_file, log_file, progress_file, print_logs=False
         )
         logger.log(f"Starting run {self.run_id}")
         try:
-            self.run_func(
+            self.trainer(
                 logger,
                 self.trainer_params,
-                self.run_id,
                 self.train_loader,
                 self.val_loader,
+                device=t.device("cuda" if t.cuda.is_available() else "cpu"),
             )
         except Exception as e:
             logger.log(f"{e.__class__.__name__}: {str(e)}\n{traceback.format_exc()}")
@@ -84,30 +88,75 @@ class Sweep:
 
     def __init__(
         self,
-        run_func: Callable,
-        params: dict[str, list[Any]],
-        data_dir: str,
+        trainer: Callable,
+        exp_dir: str,
+        exp_name: str,
         max_workers: int = 10,
-        run_name_formatter=None,
+        verbose: bool = False,
     ):
-        self.run_func = run_func
-        self.params = params
-        self.data_dir = data_dir
+        self.trainer = trainer
         self.max_workers = max_workers
-        self.run_name_formatter = run_name_formatter
+        self.verbose = verbose
+        self.exp_dir = exp_dir  # exp_dir is where the params files live - the data dirs are subdirs here
+        self.exp_name = exp_name
+        self.data_dir = Path(f"{exp_dir}/{exp_name}")
+        self.data_dir.mkdir(parents=False, exist_ok=False)
+        self.exp_file = self.find_exp_file()
+        if not self.exp_file:
+            raise ValueError(f"No exp file found - {self.exp_file}")
+        with open(self.exp_file) as f:
+            self.params = yaml.safe_load(f)
+
         self.runs = []
-        self.create_runs()
 
         # TODO: clean up
         log_file = Path(f"{self.data_dir}/logs.txt")
         progress_file = Path(f"{self.data_dir}/progress.txt")
-        Path(self.data_dir).mkdir(parents=True, exist_ok=True)
         log_file.touch()
         progress_file.touch()
+        self.create_runs()
+
+    def find_exp_file(self):
+        for filename in os.listdir(self.exp_dir):
+            if filename.startswith(self.exp_name) and filename.endswith(".yml"):
+                return os.path.join(self.exp_dir, filename)
+        return None
+
+    def format_run_name(self, trainer_config, loader_config):
+        # name should include all non-singular params
+
+        # TODO: this is awful, tidy up
+
+        variable_trainer_params = []
+        for param, param_values in {
+            **self.params["trainer"],
+        }.items():
+            if len(param_values) > 1:
+                variable_trainer_params.append(param)
+
+        variable_loader_params = []
+        for param, param_values in {
+            **self.params["loader"],
+        }.items():
+            if len(param_values) > 1:
+                variable_loader_params.append(param)
+
+        name_segments = []
+
+        for param in variable_trainer_params:
+            name_segments.append(f"{param}={trainer_config[param]}")
+
+        for param in variable_loader_params:
+            name_segments.append(f"{param}={loader_config[param]}")
+
+        if len(name_segments) == 0:
+            return "run"
+        else:
+            return "_".join(name_segments)
 
     def create_runs(self):
         run_id = 1
-        trainer_configs = list(product(*self.params["trainer"].values()))  # make anki
+        trainer_configs = list(product(*self.params["trainer"].values()))
         loader_configs = list(product(*self.params["loader"].values()))
         # shuffle b/c i tend to define params like depth in order from smallest to biggest, so this smooths out resource usage for the sweep
         random.shuffle(trainer_configs)
@@ -119,17 +168,13 @@ class Sweep:
                 trainer_config = dict(
                     zip(self.params["trainer"].keys(), trainer_config_values)
                 )
-                name = (
-                    self.run_name_formatter(trainer_config)
-                    if self.run_name_formatter
-                    else None
-                )
+                name = self.format_run_name(trainer_config, loader_config)
                 run = Run(
-                    self.run_func,
+                    self.trainer,
                     trainer_config,
                     loader_config,
                     self.data_dir,
-                    str(run_id),
+                    run_id,
                     name=name,
                 )
                 self.runs.append(run)

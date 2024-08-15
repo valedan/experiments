@@ -1,33 +1,18 @@
-# %%
-
-
-from tqdm import tqdm
-from multiprocessing import Queue, Value
-from infra.data import mnist_train_set
 from infra.logger import DataLogger
-from datasets import load_dataset
 from typing import Any
 import torch as t
 from torch import nn
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import os
 from infra.models import MLP
-from infra.runner import Sweep
 from infra.metrics import multiclass_accuracy
 
-plt.switch_backend("agg")
 
-device = t.device("cuda" if t.cuda.is_available() else "cpu")
-# print(f"Process {os.getpid()} - Using device: {device}")
-
-
-def train_classifier(
+def train_mnist_classifier(
     logger: DataLogger,
     params: dict[str, Any],
-    run_id: str,
     train_loader: DataLoader,
     val_loader: DataLoader,
+    device="cpu",
 ):
     assert train_loader and val_loader
     model = MLP(28 * 28, 10, params["depth"], params["width"])
@@ -41,7 +26,6 @@ def train_classifier(
         total_train_loss = 0
         train_accuracies = []
         for batch_idx, (train_images, labels) in enumerate(train_loader):
-            logger.log(train_images.shape)
             train_images = train_images.to(device)
             labels = labels.to(device)
             is_final_batch = batch_idx + 1 == len(train_loader)
@@ -96,63 +80,3 @@ def train_classifier(
             logger.add(**datum)
             logger.log_progress(len(train_images))
             step += 1
-
-
-params = {
-    "trainer": {
-        # "width": [10, 50, 200, 800, 1600],
-        # "depth": [1, 2, 3, 4, 5],
-        "width": [10, 20, 30, 40],
-        "depth": [1, 2, 3, 4, 5],
-        "epochs": [1],
-        "val_interval": [1],
-        "learning_rate": [0.001],
-    },
-    "loader": {
-        # "train_frac": [0.01, 0.05, 0.2],
-        "train_frac": [0.1],
-        "val_frac": [0.05],
-        "train_batch": [64],
-        "val_batch": [64],
-    },
-}
-
-test_params = {
-    "trainer": {
-        "width": 10,
-        "depth": 2,
-        "epochs": 5,
-        "val_interval": 1,
-        "learning_rate": 0.001,
-    },
-    "loader": {
-        "train_frac": 0.01,
-        "val_frac": 0.01,
-        "train_batch": 128,
-        "val_batch": 128,
-    },
-}
-
-
-def formatter(params):
-    return f"d{params['depth']}w{params['width']}"
-
-
-# sweep_dir = "results/exp1_width_depth_frac"
-sweep_dir = "results/test"
-
-
-def main():
-    sweep = Sweep(
-        train_classifier,
-        params,
-        sweep_dir,
-        run_name_formatter=formatter,
-        max_workers=20,
-    )
-    sweep.start()
-    # train_classifier(DataLogger("test", "test.jsonl", "test.txt"), test_params, "test")
-
-
-if __name__ == "__main__":
-    main()
