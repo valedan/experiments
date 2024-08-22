@@ -49,7 +49,7 @@ class Run:
 
     # TODO: Change this to __call__
     def start(self):
-        data_file = f"{self.data_dir}/{self.run_id:04d}{'_' + self.name if self.name else None}.jsonl"
+        data_file = f"{self.data_dir}/runs/{self.run_id:04d}{'_' + self.name if self.name else None}.jsonl"
         log_file = f"{self.data_dir}/logs.txt"
         progress_file = f"{self.data_dir}/progress.txt"
         logger = DataLogger(
@@ -101,6 +101,7 @@ class Sweep:
         self.exp_name = exp_name
         self.data_dir = Path(f"{exp_dir}/{exp_name}")
         self.data_dir.mkdir(parents=False, exist_ok=False)
+        Path(f"{self.data_dir}/runs").mkdir()
         self.exp_file = self.find_exp_file()
         if not self.exp_file:
             raise ValueError(f"No exp file found - {self.exp_file}")
@@ -185,6 +186,7 @@ class Sweep:
                 with open(runs_file, "a") as f:
                     run_info = {"run_id": run_id, "run_name": name}
                     run_info |= trainer_config
+                    run_info |= loader_config
                     f.write(json.dumps(run_info) + "\n")
 
                 run_id += 1

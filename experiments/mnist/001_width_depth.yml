@@ -1,0 +1,11 @@
+trainer:
+  width: [10, 50, 200, 800, 1600]
+  depth: [1, 2, 3, 4, 5]
+  epochs: [50]
+  val_interval: [1]
+  learning_rate: [0.001]
+loader:
+  train_frac: [0.01, 0.05, 0.25]
+  val_frac: [0.05]
+  train_batch: [64]
+  val_batch: [64]
