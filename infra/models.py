@@ -1,4 +1,5 @@
 from torch import nn
+import numpy as np
 
 
 class MLP(nn.Module):
@@ -11,7 +12,7 @@ class MLP(nn.Module):
         self.output = nn.Linear(width, output_dim)
 
     def forward(self, X):
-        # todo: use sequential
+        # todont: use sequential
         X = self.input(X)
         for layer in self.layers:
             X = nn.functional.relu(layer(X))

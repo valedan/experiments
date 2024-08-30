@@ -67,7 +67,7 @@ class DataLogger:
         with self.log_file.open("a") as f:
             f.write(log + "\n")
 
-    # TODO: this should really be some kind of queue or pipe, but this is easier for now.
+    # TODOnt: this should really be some kind of queue or pipe, but this is easier for now.
     def log_progress(self, completed_items: int):
         if not self.progress_file:
             raise ValueError("No progress file registered")

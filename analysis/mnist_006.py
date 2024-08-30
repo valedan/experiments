@@ -1,3 +1,4 @@
+
 # %%
 
 import pandas as pd
@@ -5,11 +6,12 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from infra.analysis import get_sweep_data, initialize_plots_dir
 
-exp_name = "mnist/002"
+exp_name = "mnist/006"
 plots_dir = initialize_plots_dir(exp_name)
 df = get_sweep_data(exp_name)
 
-# %%
+# lrs = df.groupby("learning_rate")
+# for lr, df in lrs:
 w_count = len(df["width"].unique())
 d_count = len(df["depth"].unique())
 df = df.groupby(["width", "depth"])

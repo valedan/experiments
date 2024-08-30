@@ -5,7 +5,7 @@ from torch.utils.data import random_split, DataLoader
 def mnist_train_set(train_frac=1, val_frac=0):
     transform = transforms.Compose([transforms.ToTensor()])
     train_set = datasets.MNIST(
-        root="./data", train=True, download=True, transform=transform
+        root="./.data", train=True, download=True, transform=transform
     )
     train_set, val_set, _ = random_split(
         train_set, [train_frac, val_frac, 1 - train_frac - val_frac]

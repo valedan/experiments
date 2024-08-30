@@ -1,0 +1,15 @@
+trainer:
+  width: [10, 50, 200, 800, 1600]
+  depth: [1, 2, 3, 4, 5]
+  val_interval: [1]
+  learning_rate: [0.1, 0.01, 0.001, 1]
+  optimizer: ['sgd']
+  epochs:
+    derive_from: "trainer.learning_rate"
+    operation: "reverse divide"
+    value: 10
+loader:
+  train_frac: [0.01]
+  val_frac: [0.05]
+  train_batch: [64]
+  val_batch: [64]

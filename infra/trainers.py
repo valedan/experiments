@@ -19,10 +19,16 @@ def train_mnist_classifier(
     model = model.to(device)
     step = 0
     criterion = nn.CrossEntropyLoss().to(device)
-    optimizer = t.optim.SGD(model.parameters(), params["learning_rate"])
+    if params["optimizer"] == "sgd":
+        optimizer = t.optim.SGD(model.parameters(), params["learning_rate"])
+    elif params["optimizer"] == "adam":
+        optimizer = t.optim.Adam(model.parameters())
+    else:
+        # TODO: Move param validation to the sweep
+        raise ValueError()
+    n_epochs = round(params["epochs"])
 
-    for epoch in range(1, params["epochs"] + 1):
-        logger.log(f"Starting epoch {epoch}/{params['epochs']}")
+    for epoch in range(1, n_epochs + 1):
         total_train_loss = 0
         train_accuracies = []
         for batch_idx, (train_images, labels) in enumerate(train_loader):
@@ -73,9 +79,10 @@ def train_mnist_classifier(
                 val_accuracy = sum(val_accuracies) / len(val_accuracies)
                 datum["epoch_val_loss"] = total_val_loss
                 datum["epoch_val_accuracy"] = val_accuracy
-                logger.log(
-                    f"Batch {batch_idx} - Train Loss {loss.item():.4f} - Val Loss {total_val_loss:.4f}"
-                )
+                # TODO: add verbose flag
+                # logger.log(
+                #     f"Batch {batch_idx} - Train Loss {loss.item():.4f} - Val Loss {total_val_loss:.4f}"
+                # )
 
             logger.add(**datum)
             logger.log_progress(len(train_images))

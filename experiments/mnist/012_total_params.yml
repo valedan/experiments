@@ -1,0 +1,14 @@
+trainer:
+  total_params: [1000, 5000, 10000, 20000, 40000, 60000, 80000, 100000, 150000, 200000, 300000, 400000, 500000, 750000]
+  depth: [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28]
+  width:
+    derive_from: "auto"
+    min: 5
+  val_interval: [1]
+  optimizer: ['adam']
+  epochs: [200]
+loader:
+  train_frac: [0.01]
+  val_frac: [0.05]
+  train_batch: [64]
+  val_batch: [64]

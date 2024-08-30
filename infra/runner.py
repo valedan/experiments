@@ -1,4 +1,6 @@
+import math
 from pathlib import Path
+import numpy as np
 import yaml
 import os
 import torch as t
@@ -17,6 +19,18 @@ from multiprocessing import Value, Process, Manager, Queue
 from tqdm.contrib.concurrent import process_map
 
 multiprocessing.set_start_method("spawn", force=True)
+
+
+def calculate_width(i, o, d, tp):
+    a = d
+    b = i + d + o + 1
+    c = o - tp
+    roots = np.roots([a, b, c])
+    w = max(int(round(root)) for root in roots)
+    if w < 1:
+        return None
+    else:
+        return w
 
 
 class Run:
@@ -44,7 +58,7 @@ class Run:
         return (
             len(self.train_loader)
             * self.loader_params["train_batch"]
-            * self.trainer_params["epochs"]
+            * round(self.trainer_params["epochs"])
         )
 
     # TODO: Change this to __call__
@@ -117,6 +131,42 @@ class Sweep:
         progress_file.touch()
         self.create_runs()
 
+    def is_derived_param(self, param):
+        return isinstance(param, dict) and "derive_from" in param.keys()
+
+    def add_derived_params(self, config, derived_params):
+        # TODO: currently cross-group refs not possible
+        """Compute derived params"""
+
+        for name, param in derived_params.items():
+            if param["derive_from"] == "auto":
+                if name == "width":
+                    # TODO: generalize to non-mnist
+                    width = calculate_width(
+                        28 * 28, 10, config["depth"], config["total_params"]
+                    )
+                    if "min" not in param.keys() or width >= param["min"]:
+                        config["width"] = width
+                    else:
+                        raise ValueError(f"Width {width} below minimum")
+                else:
+                    raise ValueError()
+            else:
+                parts = param["derive_from"].split(".")
+                origin_param = config[parts[1]]
+                if "offset" not in param.keys():
+                    param['offset'] = 0
+                if param["operation"] == "multiply":
+                    config[name] = origin_param * param["value"] + param["offset"]
+                if param["operation"] == "divide":
+                    config[name] = origin_param / param["value"] + param["offset"]
+                if param["operation"] == "reverse divide":
+                    config[name] = param["value"] / origin_param + param["offset"]
+                if param["operation"] == "root":
+                    config[name] = math.pow(origin_param, 1 / param["value"]) + param["offset"]
+
+        return config
+
     def find_exp_file(self):
         for filename in os.listdir(self.exp_dir):
             if filename.startswith(self.exp_name) and filename.endswith(".yml"):
@@ -157,18 +207,45 @@ class Sweep:
 
     def create_runs(self):
         run_id = 1
-        trainer_configs = list(product(*self.params["trainer"].values()))
-        loader_configs = list(product(*self.params["loader"].values()))
+        # TODO: tidy
+        given_trainer_params = {
+            k: v
+            for k, v in self.params["trainer"].items()
+            if not self.is_derived_param(v)
+        }
+        given_loader_params = {
+            k: v
+            for k, v in self.params["loader"].items()
+            if not self.is_derived_param(v)
+        }
+        trainer_configs = list(product(*given_trainer_params.values()))
+        loader_configs = list(product(*given_loader_params.values()))
+        derived_trainer_params = {
+            k: v for k, v in self.params["trainer"].items() if self.is_derived_param(v)
+        }
+        derived_loader_params = {
+            k: v for k, v in self.params["loader"].items() if self.is_derived_param(v)
+        }
         # shuffle b/c i tend to define params like depth in order from smallest to biggest, so this smooths out resource usage for the sweep
         random.shuffle(trainer_configs)
         for loader_config_values in loader_configs:
             loader_config = dict(
-                zip(self.params["loader"].keys(), loader_config_values)
+                zip(given_loader_params.keys(), loader_config_values)
+            )
+            loader_config = self.add_derived_params(
+                loader_config, derived_loader_params
             )
             for trainer_config_values in trainer_configs:
                 trainer_config = dict(
-                    zip(self.params["trainer"].keys(), trainer_config_values)
+                    zip(given_trainer_params.keys(), trainer_config_values)
                 )
+                try:
+                    # TODO: tidy up - currently throwing a value error if w too small
+                    trainer_config = self.add_derived_params(
+                        trainer_config, derived_trainer_params
+                    )
+                except ValueError:
+                    continue
                 name = self.format_run_name(trainer_config, loader_config)
                 run = Run(
                     self.trainer,
@@ -219,6 +296,9 @@ class Sweep:
             futures_list = [executor.submit(self.start_run, run) for run in runs]
             for future in futures.as_completed(futures_list):
                 try:
+                    error = future.exception()
+                    if error:
+                        print(f"Run failed with error: {error}")
                     future.result()
                 except Exception as e:
                     print(f"Run failed with error: {str(e)}")

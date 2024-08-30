@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from infra.analysis import get_sweep_data, initialize_plots_dir
 
-exp_name = "mnist/002"
+exp_name = "mnist/003"
 plots_dir = initialize_plots_dir(exp_name)
 df = get_sweep_data(exp_name)
 
@@ -17,8 +17,10 @@ df = df.groupby(["width", "depth"])
 fig, axes = plt.subplots(w_count, d_count, sharex=True, sharey=True, figsize=(14, 14))
 
 frac = 0.01
+lr = 0.01
 axes = axes.flatten()
-fig.suptitle(f"Loss - Train frac {frac}")
+fig.suptitle(f"Loss - Train frac {frac}, LR {lr}")
+axes[0].set_ylim(0, 2.5)
 
 for idx, (run_id, run_data) in enumerate(df):
     ax = axes[idx]
@@ -28,5 +30,5 @@ for idx, (run_id, run_data) in enumerate(df):
     ax.plot(run_data["step"], run_data["batch_train_loss"], label="Train Loss (Batch)")
     ax.plot(run_data["step"], run_data["epoch_val_loss"], label="Val Loss")
 
-plt.savefig(plots_dir / f"loss_{frac}.png")
+plt.savefig(plots_dir / f"loss_{frac}_{lr}.png")
 plt.show()

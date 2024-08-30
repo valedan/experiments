@@ -1,0 +1,14 @@
+trainer:
+  width: [ 2400, 2800, 3200, 4000]
+  depth: [ 16, 18, 20]
+  val_interval: [1]
+  optimizer: ['adam']
+  epochs:
+    derive_from: "trainer.depth"
+    operation: "multiply"
+    value: 50
+loader:
+  train_frac: [0.01]
+  val_frac: [0.05]
+  train_batch: [64]
+  val_batch: [64]
