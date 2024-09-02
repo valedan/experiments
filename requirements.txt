@@ -1,0 +1,10 @@
+torch
+pandas
+matplotlib
+ipdb
+jupyter
+scipy
+torchvision
+tqdm
+pydantic
+pytest

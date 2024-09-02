@@ -1,79 +1,58 @@
-import math
+from infra.configs import ConfigLoader, RunConfig
 from pathlib import Path
-import numpy as np
 import yaml
-import os
 import torch as t
 import time
-import random
 from tqdm import tqdm
-import json
 import traceback
 from infra.data import mnist_train_loaders
 from infra.logger import DataLogger
-from itertools import product
 from concurrent import futures
-from typing import Any, Callable
 import multiprocessing
-from multiprocessing import Value, Process, Manager, Queue
-from tqdm.contrib.concurrent import process_map
+from multiprocessing import Process
+from infra.models import MLP
+from infra.trainers import train_classifier
 
 multiprocessing.set_start_method("spawn", force=True)
-
-
-def calculate_width(i, o, d, tp):
-    a = d
-    b = i + d + o + 1
-    c = o - tp
-    roots = np.roots([a, b, c])
-    w = max(int(round(root)) for root in roots)
-    if w < 1:
-        return None
-    else:
-        return w
 
 
 class Run:
     """Manages a single run. It should take a run function and hyperparams, create an id, log files, and logger, and do the run. It can be called async. It also provides an api to fetch the run data."""
 
     def __init__(
-        self,
-        trainer: Callable,
-        trainer_params: dict[str, Any],
-        loader_params: dict[str, Any],
-        data_dir: Path,
-        run_id: int,
-        name: str | None = None,
+        self, config: RunConfig, data_file: Path, progress_file: Path, log_file: Path
     ):
-        self.trainer = trainer
-        self.trainer_params = trainer_params
-        self.loader_params = loader_params
-        self.data_dir = data_dir
-        self.run_id = run_id
-        self.name = name
+        self.config = config
+        self.data_file = data_file
+        self.progress_file = progress_file
+        self.log_file = log_file
         self.state = "new"
-        self.train_loader, self.val_loader = mnist_train_loaders(**loader_params)
+        if self.config.exp.type == "mnist":
+            self.train_loader, self.val_loader = mnist_train_loaders(
+                **self.config.loader.model_dump()
+            )
+            self.trainer = train_classifier
+        else:
+            raise ValueError()
 
     def num_train_samples(self):
-        return (
-            len(self.train_loader)
-            * self.loader_params["train_batch"]
-            * round(self.trainer_params["epochs"])
-        )
+        return len(self.train_loader.dataset) * self.config.trainer.epochs
 
-    # TODO: Change this to __call__
     def start(self):
-        data_file = f"{self.data_dir}/runs/{self.run_id:04d}{'_' + self.name if self.name else None}.jsonl"
-        log_file = f"{self.data_dir}/logs.txt"
-        progress_file = f"{self.data_dir}/progress.txt"
         logger = DataLogger(
-            str(self.run_id), data_file, log_file, progress_file, print_logs=False
+            str(self.config.run_id),
+            self.data_file,
+            self.log_file,
+            self.progress_file,
+            print_logs=False,
         )
-        logger.log(f"Starting run {self.run_id}")
+        model = MLP(**self.config.model.model_dump())
+        logger.log(f"Starting run {self.config.run_id}")
         try:
             self.trainer(
                 logger,
-                self.trainer_params,
+                model,
+                self.config.trainer,
                 self.train_loader,
                 self.val_loader,
                 device=t.device("cuda" if t.cuda.is_available() else "cpu"),
@@ -83,7 +62,7 @@ class Run:
             self.state = "error"
         else:
             self.state = "finished"
-            logger.log(f"Finished run {self.run_id}")
+            logger.log(f"Finished run {self.config.run_id}")
 
 
 def update_progress_bar(progress_file, total_samples):
@@ -102,191 +81,64 @@ class Sweep:
 
     def __init__(
         self,
-        trainer: Callable,
-        exp_dir: str,
-        exp_name: str,
+        exp_file: Path,
         max_workers: int = 10,
         verbose: bool = False,
     ):
-        self.trainer = trainer
+        self.exp_file = exp_file
         self.max_workers = max_workers
         self.verbose = verbose
-        self.exp_dir = exp_dir  # exp_dir is where the params files live - the data dirs are subdirs here
-        self.exp_name = exp_name
-        self.data_dir = Path(f"{exp_dir}/{exp_name}")
-        self.data_dir.mkdir(parents=False, exist_ok=False)
-        Path(f"{self.data_dir}/runs").mkdir()
-        self.exp_file = self.find_exp_file()
-        if not self.exp_file:
-            raise ValueError(f"No exp file found - {self.exp_file}")
+        self.create_data_dir()
+        self.runs = {}
+
         with open(self.exp_file) as f:
-            self.params = yaml.safe_load(f)
+            params = yaml.safe_load(f)
+            self.exp_type = params["exp"]["type"]
+            self.configs = ConfigLoader(params)
 
-        self.runs = []
-
-        # TODO: clean up
-        log_file = Path(f"{self.data_dir}/logs.txt")
-        progress_file = Path(f"{self.data_dir}/progress.txt")
-        log_file.touch()
-        progress_file.touch()
         self.create_runs()
 
-    def is_derived_param(self, param):
-        return isinstance(param, dict) and "derive_from" in param.keys()
-
-    def add_derived_params(self, config, derived_params):
-        # TODO: currently cross-group refs not possible
-        """Compute derived params"""
-
-        for name, param in derived_params.items():
-            if param["derive_from"] == "auto":
-                if name == "width":
-                    # TODO: generalize to non-mnist
-                    width = calculate_width(
-                        28 * 28, 10, config["depth"], config["total_params"]
-                    )
-                    if "min" not in param.keys() or width >= param["min"]:
-                        config["width"] = width
-                    else:
-                        raise ValueError(f"Width {width} below minimum")
-                else:
-                    raise ValueError()
-            else:
-                parts = param["derive_from"].split(".")
-                origin_param = config[parts[1]]
-                if "offset" not in param.keys():
-                    param['offset'] = 0
-                if param["operation"] == "multiply":
-                    config[name] = origin_param * param["value"] + param["offset"]
-                if param["operation"] == "divide":
-                    config[name] = origin_param / param["value"] + param["offset"]
-                if param["operation"] == "reverse divide":
-                    config[name] = param["value"] / origin_param + param["offset"]
-                if param["operation"] == "root":
-                    config[name] = math.pow(origin_param, 1 / param["value"]) + param["offset"]
-
-        return config
-
-    def find_exp_file(self):
-        for filename in os.listdir(self.exp_dir):
-            if filename.startswith(self.exp_name) and filename.endswith(".yml"):
-                return os.path.join(self.exp_dir, filename)
-        return None
-
-    def format_run_name(self, trainer_config, loader_config):
-        # name should include all non-singular params
-
-        # TODO: this is awful, tidy up
-
-        variable_trainer_params = []
-        for param, param_values in {
-            **self.params["trainer"],
-        }.items():
-            if len(param_values) > 1:
-                variable_trainer_params.append(param)
-
-        variable_loader_params = []
-        for param, param_values in {
-            **self.params["loader"],
-        }.items():
-            if len(param_values) > 1:
-                variable_loader_params.append(param)
-
-        name_segments = []
-
-        for param in variable_trainer_params:
-            name_segments.append(f"{param}={trainer_config[param]}")
-
-        for param in variable_loader_params:
-            name_segments.append(f"{param}={loader_config[param]}")
-
-        if len(name_segments) == 0:
-            return "run"
-        else:
-            return "_".join(name_segments)
+    def create_data_dir(self):
+        self.data_dir = (
+            self.exp_file.parent / self.exp_file.name[:4]
+        )  # first 3 chars of the exp file is the ID
+        self.data_dir.mkdir(parents=False, exist_ok=False)
+        Path(f"{self.data_dir}/runs").mkdir()
+        self.progress_file = Path(f"{self.data_dir}/progress.txt")
+        self.log_file = Path(f"{self.data_dir}/logs.txt")
+        self.runs_file = Path(f"{self.data_dir}/runs.jsonl")
+        self.progress_file.touch()
+        self.log_file.touch()
+        self.runs_file.touch()
 
     def create_runs(self):
         run_id = 1
-        # TODO: tidy
-        given_trainer_params = {
-            k: v
-            for k, v in self.params["trainer"].items()
-            if not self.is_derived_param(v)
-        }
-        given_loader_params = {
-            k: v
-            for k, v in self.params["loader"].items()
-            if not self.is_derived_param(v)
-        }
-        trainer_configs = list(product(*given_trainer_params.values()))
-        loader_configs = list(product(*given_loader_params.values()))
-        derived_trainer_params = {
-            k: v for k, v in self.params["trainer"].items() if self.is_derived_param(v)
-        }
-        derived_loader_params = {
-            k: v for k, v in self.params["loader"].items() if self.is_derived_param(v)
-        }
-        # shuffle b/c i tend to define params like depth in order from smallest to biggest, so this smooths out resource usage for the sweep
-        random.shuffle(trainer_configs)
-        for loader_config_values in loader_configs:
-            loader_config = dict(
-                zip(given_loader_params.keys(), loader_config_values)
-            )
-            loader_config = self.add_derived_params(
-                loader_config, derived_loader_params
-            )
-            for trainer_config_values in trainer_configs:
-                trainer_config = dict(
-                    zip(given_trainer_params.keys(), trainer_config_values)
-                )
-                try:
-                    # TODO: tidy up - currently throwing a value error if w too small
-                    trainer_config = self.add_derived_params(
-                        trainer_config, derived_trainer_params
-                    )
-                except ValueError:
-                    continue
-                name = self.format_run_name(trainer_config, loader_config)
-                run = Run(
-                    self.trainer,
-                    trainer_config,
-                    loader_config,
-                    self.data_dir,
-                    run_id,
-                    name=name,
-                )
-                self.runs.append(run)
-                runs_file = Path(f"{self.data_dir}/runs.jsonl")
-                if not runs_file.exists():
-                    runs_file.parent.mkdir(parents=True, exist_ok=True)
-                    runs_file.touch()
-                with open(runs_file, "a") as f:
-                    run_info = {"run_id": run_id, "run_name": name}
-                    run_info |= trainer_config
-                    run_info |= loader_config
-                    f.write(json.dumps(run_info) + "\n")
-
-                run_id += 1
+        for config in self.configs.shuffled():
+            config.run_id = run_id
+            run_data_file = Path(f"{self.data_dir}/runs/{run_id:04d}.jsonl")
+            run = Run(config, run_data_file, self.progress_file, self.log_file)
+            self.runs[run_id] = run
+            with open(self.runs_file, "a") as f:
+                f.write(config.model_dump_json() + "\n")
+            run_id += 1
 
     def start_run(self, run):
         try:
-            return run.start()
+            run.start()
+            return run.config.run_id
         except Exception as e:
             error_msg = f"Error in run {run.run_id}: {str(e)}\n{traceback.format_exc()}"
-            print(error_msg)  # Print to console
-            # If you have a logging system set up, you might want to log it as well
+            print(error_msg)
             # logger.error(error_msg)
-            raise  # Re-raise the exception so the future knows it failed
+            raise
 
     def start(self):
-        runs = [run for run in self.runs if run.state in ["new"]]
+        runs = [run for run in self.runs.values() if run.state in ["new"]]
         total_samples = sum([run.num_train_samples() for run in runs])
-        # TODO: this is duplicated
-        progress_file = f"{self.data_dir}/progress.txt"
         # Start the progress bar updater in a separate process
         prog = Process(
             target=update_progress_bar,
-            args=(progress_file, total_samples),
+            args=(self.progress_file, total_samples),
         )
         prog.start()
         print(
@@ -303,7 +155,7 @@ class Sweep:
                 except Exception as e:
                     print(f"Run failed with error: {str(e)}")
 
-        prog.terminate()  # need to kill because total_samples is currently overestimate due to not accounting for smaller final batch
+        prog.terminate()
         prog.join()
         print("Sweep completed")
 

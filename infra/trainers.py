@@ -1,34 +1,31 @@
+from infra.configs import TrainerParams
 from infra.logger import DataLogger
-from typing import Any
 import torch as t
 from torch import nn
 from torch.utils.data import DataLoader
-from infra.models import MLP
 from infra.metrics import multiclass_accuracy
 
 
-def train_mnist_classifier(
+def train_classifier(
     logger: DataLogger,
-    params: dict[str, Any],
+    model: nn.Module,
+    params: TrainerParams,
     train_loader: DataLoader,
     val_loader: DataLoader,
     device="cpu",
 ):
     assert train_loader and val_loader
-    model = MLP(28 * 28, 10, params["depth"], params["width"])
     model = model.to(device)
     step = 0
     criterion = nn.CrossEntropyLoss().to(device)
-    if params["optimizer"] == "sgd":
-        optimizer = t.optim.SGD(model.parameters(), params["learning_rate"])
-    elif params["optimizer"] == "adam":
+    if params.optimizer == "sgd":
+        assert params.learning_rate is not None
+        optimizer = t.optim.SGD(model.parameters(), params.learning_rate)
+    elif params.optimizer == "adam":
         optimizer = t.optim.Adam(model.parameters())
-    else:
-        # TODO: Move param validation to the sweep
-        raise ValueError()
-    n_epochs = round(params["epochs"])
 
-    for epoch in range(1, n_epochs + 1):
+
+    for epoch in range(1, params.epochs + 1):
         total_train_loss = 0
         train_accuracies = []
         for batch_idx, (train_images, labels) in enumerate(train_loader):
@@ -61,7 +58,7 @@ def train_mnist_classifier(
                     / len(train_accuracies),
                 }
 
-            if step % params["val_interval"] == 0:
+            if step % params.val_interval == 0:
                 total_val_loss = 0
                 # the accuracy will be slightly off if the last batch has fewer items, but does not seem worth the complexity to fix
                 val_accuracies = []

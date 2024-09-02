@@ -1,0 +1,21 @@
+exp:
+  type: "mnist"
+  total_params: [1000, 2000, 3000, 4000]
+model:
+  depth: [1, 2, 3, 4, 5]
+  width:
+    derive_from: "auto"
+    min: 5
+trainer:
+  optimizer: ['adam']
+  val_interval: [1]
+  epochs:
+    derive_from: "exp.total_params"
+    operation: "root"
+    offset: 1
+    value: 3
+loader:
+  train_frac: [0.01]
+  val_frac: [0.05]
+  train_batch: [64]
+  val_batch: [64]

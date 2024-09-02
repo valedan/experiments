@@ -9,9 +9,9 @@ class DataLogger:
     def __init__(
         self,
         id: str | None = None,
-        data_file: str | None = None,
-        log_file: str | None = None,
-        progress_file: str | None = None,
+        data_file: Path | str | None = None,
+        log_file: Path | str | None = None,
+        progress_file: Path | str | None = None,
         id_key: str = "id",
         print_logs: bool = True,
     ):

@@ -1,31 +1,32 @@
+import os
+from pathlib import Path
 from infra.runner import Sweep
-from infra.trainers import train_mnist_classifier
 import argparse
-from enum import Enum
 
+base_exp_dir = "./experiments"
 
-class ExpType(Enum):
-    MNIST = "mnist"
+def find_exp_file(exp_name):
+    name_parts: list = exp_name.strip().split('/')
+    exp_id = name_parts.pop()
+    exp_dir = Path(base_exp_dir) / '/'.join(name_parts)
+    for filename in os.listdir(exp_dir):
+        if filename.startswith(exp_id) and filename.endswith(".yml"):
+            return exp_dir / filename
+    return None
+
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("exp_type", type=ExpType, choices=list(ExpType))
     parser.add_argument("exp_name", type=str)
-    parser.add_argument("-mw", "--max_workers", type=int, default=10)
-    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-w", "--max_workers", type=int, default=10)
+    parser.add_argument("-v", "--verbose", action="store_false")
     args = parser.parse_args()
-
-    if args.exp_type == ExpType.MNIST:
-        trainer = train_mnist_classifier
-        exp_dir = "./experiments/mnist"
-    else:
-        raise ValueError("Invalid exp type!")
-
+    exp_file = find_exp_file(args.exp_name)
+    if not exp_file:
+        raise ValueError("Exp file not found")
     sweep = Sweep(
-        trainer,
-        exp_dir,
-        args.exp_name,
+        exp_file,
         max_workers=args.max_workers,
         verbose=args.verbose,
     )
