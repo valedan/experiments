@@ -1,0 +1,14 @@
+exp:
+  type: 'mnist'
+model:
+  depth: [1,2,3,4]
+  width: [10, 13, 16, 20, 26, 33, 42, 53, 67, 85, 108, 137, 174, 221, 281, 356, 452, 574, 728, 924, 1172, 1487, 1887, 2395, 3039, 3857, 4894, 6210, 7880, 10000] # 30 points evenly log-spaced between 10 and 10k
+trainer:
+  val_interval: [1]
+  optimizer: ['adam']
+  epochs: [10]
+loader:
+  train_frac: [0.89]
+  val_frac: [0.09]
+  train_batch: [128]
+  val_batch: [128]

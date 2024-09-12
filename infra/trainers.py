@@ -2,8 +2,24 @@ from infra.configs import TrainerParams
 from infra.logger import DataLogger
 import torch as t
 from torch import nn
+from torch.amp import autocast, GradScaler
 from torch.utils.data import DataLoader
-from infra.metrics import multiclass_accuracy
+
+PROFILE = False
+
+
+def create_profiler():
+    return t.profiler.profile(
+        activities=[
+            t.profiler.ProfilerActivity.CPU,
+            t.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=t.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
+        on_trace_ready=t.profiler.tensorboard_trace_handler("./log/pytorch_profiler"),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+    )
 
 
 def train_classifier(
@@ -15,72 +31,53 @@ def train_classifier(
     device="cpu",
 ):
     assert train_loader and val_loader
+    scaler = GradScaler()
     model = model.to(device)
-    step = 0
     criterion = nn.CrossEntropyLoss().to(device)
     if params.optimizer == "sgd":
         assert params.learning_rate is not None
-        optimizer = t.optim.SGD(model.parameters(), params.learning_rate)
+        optimizer = t.optim.SGD(model.parameters(), params.learning_rate, fused=True)
     elif params.optimizer == "adam":
-        optimizer = t.optim.Adam(model.parameters())
+        optimizer = t.optim.Adam(model.parameters(), fused=True)
 
+    if PROFILE:
+        prof = create_profiler()
+        prof.start()
 
+    step = 0
     for epoch in range(1, params.epochs + 1):
-        total_train_loss = 0
-        train_accuracies = []
-        for batch_idx, (train_images, labels) in enumerate(train_loader):
-            train_images = train_images.to(device)
-            labels = labels.to(device)
-            is_final_batch = batch_idx + 1 == len(train_loader)
-            # TODO: put this data wrangling into the dataloader or dataset
-            # TODO: normalize images so that pixels are [0, 1] not [0, 255] and see what the impact is
-            flat_images = train_images.view(train_images.shape[0], -1)
-            # flat_images.to(device)
+        for train_images, labels in train_loader:
+            with t.autocast(device_type=str(device), dtype=t.float16):
+                # TODO: try out non_blocking=true here
+                train_images = train_images.to(device)
+                labels = labels.to(device)
+                # TODO: normalize images so that pixels are [0, 1] not [0, 255] and see what the impact is
+                optimizer.zero_grad()
+                logits = model(train_images)
+                loss = criterion(logits, labels)
 
-            optimizer.zero_grad()
-            logits = model(flat_images)
-            loss = criterion(logits, labels)
-            train_accuracy = multiclass_accuracy(logits, labels)
-            total_train_loss += loss
-            train_accuracies.append(train_accuracy)
-            loss.backward()
-            optimizer.step()
-            datum = {
-                "epoch": epoch,
-                "step": step,
-                "batch_train_loss": loss.item(),
-                "batch_train_accuracy": train_accuracy,
-            }
-            if is_final_batch:
-                datum |= {
-                    "epoch_train_loss": total_train_loss.item() / len(train_loader),
-                    "epoch_train_accuracy": sum(train_accuracies)
-                    / len(train_accuracies),
-                }
+            scaler.scale(loss).backward()
+            # TODO: look into using clip_grad_norm here to deal with exploding gradients
+            scaler.step(optimizer)
+            scaler.update()
+            logger.log(logits, labels, loss, step, epoch, "train")
+            if PROFILE:
+                prof.step()
 
-            if step % params.val_interval == 0:
-                total_val_loss = 0
-                # the accuracy will be slightly off if the last batch has fewer items, but does not seem worth the complexity to fix
-                val_accuracies = []
-                with t.no_grad():
-                    for i, (val_images, labels) in enumerate(val_loader):
-                        val_images = val_images.to(device)
-                        labels = labels.to(device)
-                        flat_images = val_images.view(val_images.shape[0], -1)
-                        logits = model(flat_images)
-                        val_loss = criterion(logits, labels)
-                        total_val_loss += val_loss.item()
-                        val_accuracies.append(multiclass_accuracy(logits, labels))
+            if step % params.val_log_interval == 0:
+                # TODO: put model in eval mode here - model.eval()
+                with t.autocast(device_type=str(device), dtype=t.float16):
+                    with t.no_grad():
+                        for val_images, labels in val_loader:
+                            val_images = val_images.to(device)
+                            labels = labels.to(device)
+                            logits = model(val_images)
+                            val_loss = criterion(logits, labels)
+                            logger.log(logits, labels, val_loss, step, epoch, "val")
 
-                total_val_loss = total_val_loss / len(val_loader)
-                val_accuracy = sum(val_accuracies) / len(val_accuracies)
-                datum["epoch_val_loss"] = total_val_loss
-                datum["epoch_val_accuracy"] = val_accuracy
-                # TODO: add verbose flag
-                # logger.log(
-                #     f"Batch {batch_idx} - Train Loss {loss.item():.4f} - Val Loss {total_val_loss:.4f}"
-                # )
-
-            logger.add(**datum)
-            logger.log_progress(len(train_images))
             step += 1
+        logger.flush()
+
+    if PROFILE:
+        prof.stop()
+        print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))

@@ -1,6 +1,21 @@
+from collections import defaultdict
+from typing import Callable
 from datetime import datetime
 import json
 from pathlib import Path
+import torch as t
+
+
+def multiclass_accuracy(logits, labels):
+    assert len(logits) == len(labels)
+    preds = logits.argmax(dim=1)
+    correct = preds == labels
+    accuracy = correct.sum().item() / len(logits)
+    return accuracy
+
+
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 class DataLogger:
@@ -8,69 +23,76 @@ class DataLogger:
 
     def __init__(
         self,
+        data_file: Path | None = None,
         id: str | None = None,
-        data_file: Path | str | None = None,
-        log_file: Path | str | None = None,
-        progress_file: Path | str | None = None,
-        id_key: str = "id",
-        print_logs: bool = True,
+        after_log: Callable | None = None,
+        write_n_train_logs: int = 1,
     ):
+        self.logs = defaultdict(list)
+        self.data_file = data_file if data_file else None
         self.id = id
-        self.id_key = id_key
-        self.data_file = Path(data_file) if data_file else None
-        self.log_file = Path(log_file) if log_file else None
-        self.progress_file = Path(progress_file) if progress_file else None
-        self.print_logs = print_logs
-        self.init_files()
+        self.after_log = after_log
+        self.write_n_train_logs = write_n_train_logs
 
-    def init_files(self):
-        if self.data_file:
-            if self.data_file.suffix != ".jsonl":
-                raise ValueError("Data file must be jsonl")
-            if not self.data_file.exists():
-                self.data_file.parent.mkdir(parents=True, exist_ok=True)
-                self.data_file.touch()
+    def log(self, logits, labels, loss, step, epoch, split):
+        self.logs[epoch].append(
+            {
+                "logits": logits,
+                "labels": labels,
+                "loss": loss,
+                "step": step,
+                "split": split,
+                "created_at": now(),
+            }
+        )
 
-        if self.log_file:
-            if self.log_file.suffix != ".txt":
-                raise ValueError("Log file must be txt")
-            if not self.log_file.exists():
-                self.log_file.parent.mkdir(parents=True, exist_ok=True)
-                self.log_file.touch()
+    def flush(self):
+        """Should be called at the end of an epoch"""
+        total_train_samples = 0
+        for epoch, logs in self.logs.items():
+            total_train_loss = t.tensor([0.0]).to("cuda")
+            train_accuracies = []
+            total_val_loss = t.tensor([0.0]).to("cuda")
+            val_accuracies = []
+            data = []
+            for idx, log in enumerate(logs):
+                if log["split"] == "train":
+                    # TODO: DataLogger should take a list of metrics to calculate
+                    total_train_samples += len(log['labels'])
+                    total_train_loss += log["loss"]
+                    train_accuracy = multiclass_accuracy(log["logits"], log["labels"])
+                    train_accuracies.append(train_accuracy)
+                    if idx % self.write_n_train_logs == 0:
+                        data.append(
+                            {
+                                "batch_train_loss": log["loss"].item(),
+                                "batch_train_accuracy": train_accuracy,
+                                "step": log["step"],
+                                "epoch": epoch,
+                            }
+                        )
+                elif log["split"] == "val":
+                    total_val_loss += log["loss"]
+                    val_accuracy = multiclass_accuracy(log["logits"], log["labels"])
+                    val_accuracies.append(val_accuracy)
+            datum = {"epoch": epoch}
+            if len(train_accuracies) > 0:
+                datum |= {
+                    "epoch_train_loss": total_train_loss.item() / len(train_accuracies),
+                    "epoch_train_accuracy": sum(train_accuracies)
+                    / len(train_accuracies),
+                }
+            if len(val_accuracies) > 0:
+                datum |= {
+                    "epoch_val_loss": total_val_loss.item() / len(val_accuracies),
+                    "epoch_val_accuracy": sum(val_accuracies) / len(val_accuracies),
+                }
+            data.append(datum)
 
-        if self.progress_file:
-            if self.progress_file.suffix != ".txt":
-                raise ValueError("progress file must be txt")
-            if not self.progress_file.exists():
-                self.progress_file.parent.mkdir(parents=True, exist_ok=True)
-                self.progress_file.touch()
-
-    @staticmethod
-    def _now():
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    def add(self, **kwargs):
-        if not self.data_file:
-            raise ValueError("No data file registered")
-
-        data = {**kwargs, "id": self.id, "created_at": self._now()}
         with self.data_file.open("a") as f:
-            f.write(json.dumps(data) + "\n")
+            for datum in data:
+                f.write(json.dumps({"id": self.id, **datum}) + "\n")
+        if self.after_log:
+            self.after_log(total_train_samples)
 
-    def log(self, log: str):
-        if not self.log_file:
-            raise ValueError("No log file registered")
-
-        if self.print_logs:
-            print(f"{self.id} - {log}")
-        log = f"{self._now()} - {log}"
-        with self.log_file.open("a") as f:
-            f.write(log + "\n")
-
-    # TODOnt: this should really be some kind of queue or pipe, but this is easier for now.
-    def log_progress(self, completed_items: int):
-        if not self.progress_file:
-            raise ValueError("No progress file registered")
-
-        with self.progress_file.open("a") as f:
-            f.write(f"{completed_items}" + "\n")
+        self.logs = defaultdict(list)

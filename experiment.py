@@ -19,16 +19,13 @@ def find_exp_file(exp_name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("exp_name", type=str)
-    parser.add_argument("-w", "--max_workers", type=int, default=10)
-    parser.add_argument("-v", "--verbose", action="store_false")
+    parser.add_argument("-f", "--force", type=bool, default=False)
     args = parser.parse_args()
     exp_file = find_exp_file(args.exp_name)
     if not exp_file:
         raise ValueError("Exp file not found")
     sweep = Sweep(
         exp_file,
-        max_workers=args.max_workers,
-        verbose=args.verbose,
     )
     sweep.start()
 
