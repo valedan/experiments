@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from scipy.signal import savgol_filter
 import json
 import numpy as np
@@ -6,100 +7,78 @@ from pathlib import Path
 import pandas as pd
 import shutil
 
-base_exp_dir = Path("/home/dan/Dropbox/projects/exploration/experiments")
-base_plots_dir = Path("/home/dan/Dropbox/projects/exploration/analysis")
+from infra.utils import flatten
 
 palette = mpl.colormaps["tab20"]
 metrics = {
-    "batch_train_loss": {
+    "loss_mean": {
         "better": "lower",
         "color": palette(0),
         "linestyle": "-",
         "alpha": 0.25,
     },
-    "epoch_val_loss": {
-        "better": "lower",
+    "accuracy_mean": {
+        "better": "higher",
         "color": palette(2),
-        "linestyle": "-",
-        "alpha": 0.25,
-    },
-    "batch_train_accuracy": {
-        "better": "higher",
-        "color": palette(4),
-        "linestyle": "-",
-        "alpha": 0.25,
-    },
-    "epoch_val_accuracy": {
-        "better": "higher",
-        "color": palette(6),
         "linestyle": "-",
         "alpha": 0.25,
     },
 }
 
+# TODO: delete?
 smoothed_metrics = {
     f"smoothed_{k}": {**v, "alpha": 1.0, "linestyle": "--"} for k, v in metrics.items()
 }
 
 
-def initialize_plots_dir(exp_name, refresh=False):
-    plots_dir = base_plots_dir / exp_name
-    if refresh and plots_dir.exists():
-        shutil.rmtree(str(plots_dir))
+class SweepData:
+    def __init__(
+        self,
+        sweep_dirs: Path | Iterable[Path],
+        results_dir: Path | None = None,
+        cols_to_smooth: Iterable[str] | None = tuple(metrics),
+    ):
+        self.cols_to_smooth = tuple(cols_to_smooth or ())
 
-    plots_dir.mkdir(parents=True, exist_ok=True)
-    return plots_dir
+        if isinstance(sweep_dirs, Iterable):
+            self.sweep_dirs = tuple(Path(dir) for dir in sweep_dirs)
+        else:
+            self.sweep_dirs = (Path(sweep_dirs),)
+        assert all(dir.is_dir() for dir in self.sweep_dirs)
 
+        if results_dir is None:
+            self.results_dir = self.sweep_dirs[0] / "results"
+        else:
+            self.results_dir = Path(results_dir)
 
-def read_run(filename):
-    return pd.read_json(filename, lines=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
 
+        self.data = self.ingest_sweep_data()
 
-def get_sweep_data(exp_name, cols_to_smooth=None):
-    params_list = []
-    with open(base_exp_dir / exp_name / "runs.jsonl") as f:
-        # TODO: tidy up
-        for line in f.readlines():
-            params = json.loads(line)
-            flat_params = {}
-            for group_name, group in params.items():
-                if isinstance(group, dict):
-                    for param_name, param in group.items():
-                        flat_params[f"{group_name}.{param_name}"] = param
-                else:
-                    flat_params[group_name] = group
-            params_list.append(flat_params)
-    params_df = pd.DataFrame(params_list)
+    def read_run(self, filename):
+        df = pd.read_json(filename, lines=True, dtype={'run_id': str})
 
-    runs_dir = base_exp_dir / exp_name / "runs"
-    run_files = list(runs_dir.glob("*.jsonl"))
-    df = pd.DataFrame()
-    for f in run_files:
-        new_data = read_run(f)
-        df = pd.concat([df, new_data])
-
-    df = pd.merge(df, params_df, left_on="id", right_on="id")
-    df = df.drop(columns=["created_at"])
-    if cols_to_smooth:
-        for col in cols_to_smooth:
-            assert col in df.columns
+        for col in self.cols_to_smooth:
             df[f"smoothed_{col}"] = savgol_filter(df[col], 51, 3)
-            for _, run_df in df.groupby("id"):
-                # remove early and late values because savgol goes to crazy values at the edges
-                start_indices = run_df.index[run_df["step"] < 30]
-                end_indices = run_df.index[
-                    run_df["step"] >= (run_df["step"].max() - 29)
-                ]
+            # remove early and late values because savgol goes to crazy values at the edges
+            df.loc[~df["step"].between(30, df["step"].max() - 30), f"smoothed_{col}"] = np.nan
 
-                df.loc[start_indices, f"smoothed_{col}"] = np.nan
-                df.loc[end_indices, f"smoothed_{col}"] = np.nan
-    return df
+        return df
 
+    def ingest_sweep_data(self):
+        dfs = []
+        for sweep_dir in self.sweep_dirs:
+            with open(sweep_dir / "runs.jsonl") as f:
+                run_configs_df = pd.DataFrame(flatten(json.loads(line)) for line in f.readlines())
 
-def get_sweep_data_for_experiments(exp_names, cols_to_smooth=None):
-    dfs = []
-    for exp in exp_names:
-        df = get_sweep_data(exp, cols_to_smooth)
-        df["exp_name"] = exp
-        dfs.append(df)
-    return pd.concat(dfs)
+            run_files = list((sweep_dir / "runs").glob("*/training_logs.jsonl"))
+
+            df = pd.concat(self.read_run(f) for f in run_files)
+            df = pd.merge(df, run_configs_df, left_on="run_id", right_on="id")
+            df["sweep_name"] = sweep_dir.name
+            dfs.append(df)
+        return pd.concat(dfs)
+
+    def clear_results_dir(self):
+        shutil.rmtree(str(self.results_dir))
+        self.results_dir.mkdir(parents=True, exist_ok=True)

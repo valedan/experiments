@@ -1,0 +1,17 @@
+val_interval: [100]
+epochs: [10]
+optimizer:
+  name: "adam"
+  learning_rate: 0.001
+model:
+  architecture: 'mlp'
+  input_dim: 784
+  output_dim: 10
+  depth: [2, 4]
+  width: [1000]
+loader:
+  dataset: 'mnist'
+  train_frac: [0.2]
+  val_frac: [0.1]
+  train_batch: [128]
+  val_batch: [128]

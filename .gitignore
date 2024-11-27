@@ -3,4 +3,10 @@ __pycache__/
 .data/
 experiments/**/*/
 analysis/**/*/
-
+sweeps/**/*/
+*.egg-info/
+*.egg
+infra/tests/integration/test_sweeps
+*.pt
+*.pyc
+*.jsonl

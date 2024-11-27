@@ -1,98 +1,75 @@
-from collections import defaultdict
-from typing import Callable
+from typing import Callable, Iterable
 from datetime import datetime
 import json
 from pathlib import Path
-import torch as t
 
 
-def multiclass_accuracy(logits, labels):
-    assert len(logits) == len(labels)
-    preds = logits.argmax(dim=1)
-    correct = preds == labels
-    accuracy = correct.sum().item() / len(logits)
-    return accuracy
-
-
-def now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 class DataLogger:
-    """A logger class to use for experiments. Each instance can have an associated data file to write new data to, and a log file to write logs to. Uses jsonl for data and txt for logs. Can have an identifier to associate to a run/sweep."""
+    """Handles data logging for a training run. Computing metrics usually requires syncing gpu tensors to cpu, which hurts performance if done too often, so we buffer metric calculations and file writes.
+
+    Log training steps with log(). There are flushed to the data_path based on flush_interval. In general, data sent to log() is not directly logged to the file - instead it is used by the specified metric functions to compute aggregate statistics over the flush interval. For example, the accuracy metric relies on logits so these must be logged, but only the accuracy stats are written to the data file, not the raw logits. Field names in fields_to_log are written directly to the log file based on their value in the most recent log entry prior to flushing.
+    """
 
     def __init__(
         self,
-        data_file: Path | None = None,
+        data_path: Path | str,
         id: str | None = None,
-        after_log: Callable | None = None,
-        write_n_train_logs: int = 1,
+        flush_interval: int = 1000,
+        aggregation_interval: int = 1,
+        metrics: Iterable[Callable] | None = None,
     ):
-        self.logs = defaultdict(list)
-        self.data_file = data_file if data_file else None
         self.id = id
-        self.after_log = after_log
-        self.write_n_train_logs = write_n_train_logs
+        self.buffer = []
+        self.data_path = Path(data_path)
+        self.flush_interval = flush_interval
+        self.aggregation_interval = aggregation_interval
+        self.metrics = list(metrics or [])
+        self.fields_to_log = ["step", "time", "epoch", "run_id"]
 
-    def log(self, logits, labels, loss, step, epoch, split):
-        self.logs[epoch].append(
-            {
-                "logits": logits,
-                "labels": labels,
-                "loss": loss,
-                "step": step,
-                "split": split,
-                "created_at": now(),
-            }
-        )
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, tb):
+        self.flush()
+        return False
+
+    def log(self, **kwargs):
+        self.buffer.append({**kwargs, "time": timestamp()})
+
+        if self.flush_interval and len(self.buffer) >= self.flush_interval:
+            self.flush()
+
 
     def flush(self):
-        """Should be called at the end of an epoch"""
-        total_train_samples = 0
-        for epoch, logs in self.logs.items():
-            total_train_loss = t.tensor([0.0]).to("cuda")
-            train_accuracies = []
-            total_val_loss = t.tensor([0.0]).to("cuda")
-            val_accuracies = []
-            data = []
-            for idx, log in enumerate(logs):
-                if log["split"] == "train":
-                    # TODO: DataLogger should take a list of metrics to calculate
-                    total_train_samples += len(log['labels'])
-                    total_train_loss += log["loss"]
-                    train_accuracy = multiclass_accuracy(log["logits"], log["labels"])
-                    train_accuracies.append(train_accuracy)
-                    if idx % self.write_n_train_logs == 0:
-                        data.append(
-                            {
-                                "batch_train_loss": log["loss"].item(),
-                                "batch_train_accuracy": train_accuracy,
-                                "step": log["step"],
-                                "epoch": epoch,
-                            }
-                        )
-                elif log["split"] == "val":
-                    total_val_loss += log["loss"]
-                    val_accuracy = multiclass_accuracy(log["logits"], log["labels"])
-                    val_accuracies.append(val_accuracy)
-            datum = {"epoch": epoch}
-            if len(train_accuracies) > 0:
-                datum |= {
-                    "epoch_train_loss": total_train_loss.item() / len(train_accuracies),
-                    "epoch_train_accuracy": sum(train_accuracies)
-                    / len(train_accuracies),
-                }
-            if len(val_accuracies) > 0:
-                datum |= {
-                    "epoch_val_loss": total_val_loss.item() / len(val_accuracies),
-                    "epoch_val_accuracy": sum(val_accuracies) / len(val_accuracies),
-                }
-            data.append(datum)
+        if not self.buffer:
+            return None
 
-        with self.data_file.open("a") as f:
-            for datum in data:
-                f.write(json.dumps({"id": self.id, **datum}) + "\n")
-        if self.after_log:
-            self.after_log(total_train_samples)
+        for idx in range(0, len(self.buffer), self.aggregation_interval):
+            batch = self.buffer[idx:idx+self.aggregation_interval]
 
-        self.logs = defaultdict(list)
+            summary = {
+                "logger_id": self.id,
+                "n_steps": len(batch),
+            }
+            summary |= {
+                field: batch[-1][field]
+                for field in self.fields_to_log
+                if field in batch[-1]
+            }
+
+            field_data_map = {}
+            keys = set(key for log in batch for key in log)
+            for key in keys:
+                field_data_map[key] = [log[key] for log in batch if key in log]
+
+            for metric in self.metrics:
+                summary |= metric(field_data_map)
+
+            with self.data_path.open("a") as f:
+                f.write(json.dumps(summary) + "\n")
+
+        self.buffer = []
