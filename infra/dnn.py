@@ -100,11 +100,15 @@ class MultiheadAttention(Module):
         self.output = Linear(num_heads * vdim, embed_dim)
 
     def forward(self, X):
+        if X.ndim == 2:
+            # add missing batch dim
+            X = X.unsqueeze(0)
+
         Q = (X.unsqueeze(1) @ self.W_Q) + self.B_Q.unsqueeze(1)
         K = (X.unsqueeze(1) @ self.W_K) + self.B_K.unsqueeze(1)
         V = (X.unsqueeze(1) @ self.W_V) + self.B_V.unsqueeze(1)
         qk = Q @ K.mT
-        #TODO add attention mask for padding tokens to avoid wasted compute - i think the tokenizer provides this to the model along with the batch
+        # TODO add attention mask for padding tokens to avoid wasted compute - i think the tokenizer provides this to the model along with the batch
         mask = t.triu(qk, diagonal=1)
         mask[mask != 0] = float("-inf")
         # TODO

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field, asdict
 from contextlib import nullcontext
 import torch as t
+from torch.autograd.profiler import record_function
 from typing import Literal
 from torch import GradScaler, OutOfMemoryError, nn
 from torch.utils.data import DataLoader
@@ -145,7 +146,6 @@ class Run:
         val_loader: DataLoader | None = None,
         model=None,
     ):
-        # t.cuda.memory._record_memory_history()
         self.init_device()
 
         if train_loader is None:
@@ -163,34 +163,44 @@ class Run:
             desc="Training Run",
             unit="samples",
             leave=False,
-        ) as run_bar, self.profiler(), self.create_logger("train") as train_logger:
+        ) as run_bar, self.profiler() as prof, self.create_logger("train") as train_logger:
             for _ in range(self.config.epochs):
-                try:
-                    self.epoch += 1
-                    for batch in train_loader:
-                        self.step += 1
+                self.epoch += 1
+                for batch in train_loader:
+                    self.step += 1
 
-                        model.train()
-                        optimizer.zero_grad()
+                    model.train()
+                    optimizer.zero_grad()
+
+                    with record_function('forward'):
                         loss, _, _ = self.evaluate_batch(batch, model, criterion, train_logger)
 
+                    with record_function('backward'):
                         scaler.scale(loss).backward()
-                        # TODO: look into using clip_grad_norm here to deal with exploding gradients
-                        scaler.step(optimizer)
-                        scaler.update()
-                        run_bar.update(len(batch[0]))
 
-                        if val_loader and self.step % self.config.val_interval == 0:
+                    # TODO: look into using clip_grad_norm here to deal with exploding gradients
+                    with record_function('optimizer'):
+                        scaler.step(optimizer)
+
+                    scaler.update()
+                    run_bar.update(len(batch[0]))
+
+                    if val_loader and self.step % self.config.val_interval == 0:
+                        print('val')
+                        with record_function('validation'):
                             model.eval()
                             # 0 disables automatic flushing because we just want it to happen after the whole epoch. could cause perf issues if val dataset is extremely large
                             with self.create_logger("val", 0) as val_logger, t.no_grad():
                                 for batch in val_loader:
                                     self.evaluate_batch(batch, model, criterion, val_logger)
-                except OutOfMemoryError as e:
-                    # t.cuda.memory._dump_snapshot("my_snapshot.pickle")
-                    breakpoint()
+                    if prof:
+                        prof.step()
+
+        if prof:
+            prof.export_memory_timeline(f"{self.run_dir}/memory_timeline.html")
 
         self.save_model_checkpoint(model, "final")
+
 
     def profiler(self):
         """pytorch profiler to use when a Run is in profile mode"""
@@ -203,9 +213,10 @@ class Run:
                 t.profiler.ProfilerActivity.CPU,
                 t.profiler.ProfilerActivity.CUDA,
             ],
-            schedule=t.profiler.schedule(wait=1, warmup=1, active=3, repeat=2),
-            on_trace_ready=t.profiler.tensorboard_trace_handler("./log/pytorch_profiler"),
+            schedule=t.profiler.schedule(wait=0, warmup=0, active=6, repeat=1),
+            on_trace_ready=t.profiler.tensorboard_trace_handler(f"{self.run_dir}/pytorch_profiler"),
             record_shapes=True,
             profile_memory=True,
             with_stack=True,
+            with_modules=True
         )

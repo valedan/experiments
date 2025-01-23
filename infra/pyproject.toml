@@ -12,3 +12,5 @@ where = ["."]
 
 [tool.ruff]
 line-length = 100
+[tool.ruff.lint.isort]
+known-first-party = ["infra"]  # Tell Ruff which packages are local

@@ -32,6 +32,7 @@ smoothed_metrics = {
 
 
 class SweepData:
+    # If keeping the class, use __getattr__ to delegate to data
     def __init__(
         self,
         sweep_dirs: Path | Iterable[Path],
@@ -55,13 +56,16 @@ class SweepData:
 
         self.data = self.ingest_sweep_data()
 
+
     def read_run(self, filename):
         df = pd.read_json(filename, lines=True, dtype={'run_id': str})
 
         for col in self.cols_to_smooth:
-            df[f"smoothed_{col}"] = savgol_filter(df[col], 51, 3)
-            # remove early and late values because savgol goes to crazy values at the edges
-            df.loc[~df["step"].between(30, df["step"].max() - 30), f"smoothed_{col}"] = np.nan
+            window_length = 51
+            if col in df.columns and len(df[col]) >= window_length:
+                df[f"smoothed_{col}"] = savgol_filter(df[col], window_length, 3)
+                # remove early and late values because savgol goes to crazy values at the edges
+                df.loc[~df["step"].between(30, df["step"].max() - 30), f"smoothed_{col}"] = np.nan
 
         return df
 
