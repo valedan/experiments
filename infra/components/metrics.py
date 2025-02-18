@@ -1,7 +1,7 @@
 import torch
 
 
-def multiclass_accuracy(logs):
+def accuracy(logs):
     logits = torch.cat(logs["logits"])
     labels = torch.cat(logs["labels"])
     preds = logits.argmax(dim=1)

@@ -64,7 +64,7 @@ model = Transformer(
 
 train_loader = DataLoader(stories, batch_size=32, shuffle=True, collate_fn=collate_fn)
 run_dir = Path("./notebooks/scratch/transformer_run")
-config = RunConfig(val_interval=0, epochs=10)
+config = Runonfig(val_interval=0, epochs=10)
 
 run = Run(config, run_dir)
 run.start(train_loader, model=model)

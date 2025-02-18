@@ -51,6 +51,7 @@ class DataLogger:
         for idx in range(0, len(self.buffer), self.aggregation_interval):
             batch = self.buffer[idx:idx+self.aggregation_interval]
 
+            # TODO: I think logger id is not needed
             summary = {
                 "logger_id": self.id,
                 "n_steps": len(batch),

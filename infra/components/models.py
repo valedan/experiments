@@ -1,21 +1,8 @@
-from infra import dnn
+from infra.components import dnn
 from torch import nn
 import torch as t
 
 
-def get_model(config: dict) -> nn.Module:
-    architecture = config.pop("architecture")
-    match architecture:
-        case "mlp":
-            return MLP(**config)
-        case "alexnet":
-            return AlexNet(**config)
-        case "lenet":
-            return LeNet(**config)
-        case "transformer":
-            return Transformer(**config)
-        case _:
-            raise ValueError(f"Unknown architecture {architecture}")
 
 
 class MLP(nn.Module):
@@ -132,13 +119,13 @@ class PositionalEncoding(nn.Module):
 class Transformer(nn.Module):
     def __init__(
         self,
-        d_model,
-        nhead,
-        num_decoder_layers,
-        dim_feedforward,
-        vocab_size,
-        context_size,
-        use_dnn=True,
+        d_model: int,
+        nhead: int,
+        num_decoder_layers: int,
+        dim_feedforward: int,
+        vocab_size: int,
+        context_size: int,
+        use_dnn: bool=True,
     ):
         super().__init__()
         print(f"Use dnn: {use_dnn}")

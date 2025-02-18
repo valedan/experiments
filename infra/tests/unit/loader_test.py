@@ -1,4 +1,4 @@
-from infra.loaders import TokenizerConfig, get_loaders, LoaderConfig
+from infra.loaders import TokenizerConfig, create_loaders_from_config, LoaderConfig
 from datasets import load_dataset
 from infra import tokens
 
@@ -19,7 +19,7 @@ def get_loader_batches(dataset, loader_args=None, n_expected_loaders=3):
         dataset=dataset,
     )
 
-    loaders = get_loaders(config, **loader_args)
+    loaders = create_loaders_from_config(config, **loader_args)
 
     if n_expected_loaders:
         assert len(loaders) == n_expected_loaders
